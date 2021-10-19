@@ -1,10 +1,12 @@
+from __future__ import annotations
 from .data import *
+from .ducks import CacheManager, GatewayManager
 from .events import *
 from .new_data import *
 from aiohttp import ClientSession
 from itertools import count
-from json import dumps, loads
-from typing import Callable, Optional, Protocol
+from json import dumps
+from typing import Callable, Optional
 
 class RESTClient:
 	_token: str
@@ -48,17 +50,6 @@ class RESTClient:
 # 	async def send_bytes(self, data: bytes): ...
 # 	async def receive(self) -> : ...
 
-class GatewayManager(Protocol):
-	heartbeat_interval: Optional[int]
-
-	async def heartbeat_now(self): ...
-	async def send_str(self, data: str): ...
-	async def send_bytes(self, data: bytes): ...
-
-class CacheManager(Protocol):
-	async def cache_guild(self, guild: Guild): ...
-	async def cache_user(self, user): ...
-
 class GatewayClient:
 	token: str
 	manager: GatewayManager
@@ -80,8 +71,9 @@ class GatewayClient:
 			event: str = payload["t"]
 
 			if event == "READY":
-				user = SelfUser._from_api(data["user"])
-				guilds = [Guild._from_api(guild) for guild in data["guilds"]]
+				user = SelfUser._from_api(self.cache, data["user"])
+				guilds = [Guild._from_api(self.cache, guild) \
+					for guild in data["guilds"]]
 
 				if self.cache is not None:
 					for guild in guilds:
@@ -89,6 +81,15 @@ class GatewayClient:
 					self.cache.cache_user()
 
 				self.dispatch(ReadyEvent(user, guilds))
+			elif event == "GUILD_CREATE":
+				guild = AvailableGuild._from_api(self.cache, data)
+
+				if self.cache is not None:
+					self.cache.cache_guild(guild)
+
+				self.dispatch(GuildCreateEvent(guild))
+			else:
+				print(event, data)
 		elif op_code == 1:
 			await self.manager.heartbeat_now()
 		elif op_code == 10: # Hello!

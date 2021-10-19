@@ -115,10 +115,10 @@ class NewGuildCategoryChannel(NewGuildChannel):
 			"name": self.name
 		}
 
-class NewGuildSiblingChannel(NewGuildChannel):
+class NewGuildChildChannel(NewGuildChannel):
 	parent: Optional[NewGuildCategoryChannel]
 
-class NewGuildTextChannel(NewGuildSiblingChannel):
+class NewGuildTextChannel(NewGuildChildChannel):
 	_topic: Optional[str]
 
 	topic = bounded_property("_topic", 0, 1024)

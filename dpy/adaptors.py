@@ -38,7 +38,6 @@ class AIOHTTPGatewayManager:
 				start = time_ns()
 				message = loads(await self.socket.receive_str(timeout=timeout))
 				if message["s"] is not None:
-					print(sequence)
 					sequence = message["s"]
 
 				await self.client.process_payload(message)
@@ -56,6 +55,5 @@ class AIOHTTPGatewayManager:
 				else:
 					# If we timed out for any other reason then it must be because we hit
 					# the heartbeat timeout, so time to pulse blood through our veins!
-					print("Heartbeat", sequence)
 					await self.send_str(dumps({"op": 1, "d": sequence}))
 					self.waited = 0

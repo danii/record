@@ -8,3 +8,7 @@ class Event:
 class ReadyEvent(Event):
 	user: SelfUser
 	guilds: list[Guild]
+
+@dataclass
+class GuildCreateEvent(Event):
+	guild: AvailableGuild
