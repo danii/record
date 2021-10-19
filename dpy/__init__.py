@@ -49,7 +49,11 @@ class RESTClient:
 # 	async def receive(self) -> : ...
 
 class GatewayManager(Protocol):
+	heartbeat_interval: Optional[int]
+
+	async def heartbeat_now(self): ...
 	async def send_str(self, data: str): ...
+	async def send_bytes(self, data: bytes): ...
 
 class CacheManager(Protocol):
 	async def cache_guild(self, guild: Guild): ...
@@ -85,8 +89,12 @@ class GatewayClient:
 					self.cache.cache_user()
 
 				self.dispatch(ReadyEvent(user, guilds))
+		elif op_code == 1:
+			await self.manager.heartbeat_now()
 		elif op_code == 10: # Hello!
-			message = dumps({
+			self.manager.heartbeat_interval = data["heartbeat_interval"]
+
+			await self.manager.send_str(dumps({
 				"op": 2,
 				"d": {
 					"token": self.token,
@@ -98,5 +106,4 @@ class GatewayClient:
 					"compress": False,
 					"intents": 0b111111111111111
 				}
-			})
-			await self.manager.send_str(message)
+			}))
