@@ -146,3 +146,20 @@ class NewGuildTextChannel(NewGuildChildChannel):
 	@staticmethod
 	def _name_implicit_transform(name: str) -> str:
 		return name.lower().replace(" ", "-").replace("_", "-")
+
+class NewMessage:
+	_content: str
+
+	content = bounded_property("_content", 0, 4000)
+
+	def __init__(self):
+		self._content = ""
+
+	def _to_api(self) -> dict[str, Any]:
+		if self._content == "":
+			raise ValueError('property "content" must be set or')
+
+		return {
+			"id": 4,
+			"content": self._content
+		}

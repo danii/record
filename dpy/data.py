@@ -62,6 +62,8 @@ class Guild(Entity):
 @entity
 class AvailableGuild(Guild):
 	name: str
+	owner: int
+
 	roles: list[Role]
 	channels: list[GuildChannel]
 
@@ -75,11 +77,11 @@ class AvailableGuild(Guild):
 	@classmethod
 	def _from_api(cls, cache: Optional[CacheManager], data):
 		roles = [Role._from_api(cache, role) for role in data["roles"]]
-		channels = [GuildChannel._from_api(cache, channel) \
-			for channel in data["channels"]]
+		channels = [GuildChannel._from_api(cache, channel) for channel in 
+			(data["channels"] if "channels" in data else [])]
 
 		return cls(cls._INSTANTIATION_NONCE, id=data["id"], name=data["name"],
-			roles=roles, channels=channels)
+			owner=data["owner_id"], roles=roles, channels=channels)
 
 @entity
 class Role(Entity):
@@ -96,13 +98,8 @@ class Role(Entity):
 	def _from_api(cls, cache: Optional[CacheManager], data):
 		return cls(cls._INSTANTIATION_NONCE, id=data["id"], name=data["name"])
 
-@entity
-class GuildChannel(Entity):
+class Channel(Entity):
 	id: int
-	name: str
-
-	def __repr__(self) -> str:
-		return self.name
 
 	@classmethod
 	def _from_api(cls, cache: Optional[CacheManager], data):
@@ -112,6 +109,17 @@ class GuildChannel(Entity):
 			return GuildTextChannel._from_api(cache, data)
 		elif type == 4:
 			return GuildCategoryChannel._from_api(cache, data)
+
+@entity
+class TextChannel(Channel):
+	pass
+
+@entity
+class GuildChannel(Channel):
+	name: str
+
+	def __repr__(self) -> str:
+		return self.name
 
 @entity
 class GuildCategoryChannel(GuildChannel):
@@ -124,7 +132,7 @@ class GuildChildChannel(GuildChannel):
 	parent: Optional[Union[GuildCategoryChannel, int]]
 
 @entity
-class GuildTextChannel(GuildChildChannel):
+class GuildTextChannel(GuildChildChannel, TextChannel):
 	topic: str
 	nsfw: bool
 
@@ -139,8 +147,11 @@ class GuildTextChannel(GuildChildChannel):
 		return cls(cls._INSTANTIATION_NONCE, id=data["id"], name=data["name"],
 			topic=data["topic"], nsfw=data.get("nsfw", False), parent=parent)
 
-
 @entity
 class Message(Entity):
 	id: int
 	content: str
+
+	@classmethod
+	def _from_api(cls, cache: Optional[CacheManager], data):
+		return cls(cls._INSTANTIATION_NONCE, id=data["id"], content=data["content"])

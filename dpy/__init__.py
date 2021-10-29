@@ -6,10 +6,11 @@ from .new_data import *
 from aiohttp import ClientSession
 from itertools import count
 from json import dumps
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 class RESTClient:
 	_token: str
+	base = "https://discord.com/api/v9"
 	session: ClientSession
 
 	def __init__(self, token: str, session: Optional[ClientSession] = None):
@@ -23,16 +24,28 @@ class RESTClient:
 	async def __aexit__(self, exception_type, exception, traceback):
 		await self.session.__aexit__(exception_type, exception, traceback)
 
-	async def create_guild(self, guild: NewGuild):
+	async def create_guild(self, guild: NewGuild) -> AvailableGuild:
+		endpoint = f"{self.base}/guilds"
+		print(endpoint)
 		data = dumps(guild._to_api())
-		await self.session.post(
-			"https://discord.com/api/v9/guild",
-			data=data,
-			headers={
-				"content-type": "application/json",
-				"authorization": self._token
-			}
-		)
+		headers = {
+			"content-type": "application/json",
+			"authorization": self._token
+		}
+
+		async with self.session.post(endpoint, data=data, headers=headers) \
+				as response:
+			return AvailableGuild._from_api(None, await response.json())
+
+	async def delete_guild(self, guild: Union[AvailableGuild, int]):
+		guild: int = guild.id if isinstance(guild, AvailableGuild) else guild
+		endpoint = f"{self.base}/guilds/{guild}"
+		headers = {
+			"authorization": self._token
+		}
+
+		async with self.session.delete(endpoint, headers=headers):
+			pass
 
 	async def create_guild_channel(self, guild: int, channel: NewGuildChannel):
 		async with self.session.post(
@@ -45,6 +58,20 @@ class RESTClient:
 				) as session:
 			print(session)
 
+	async def create_message(self, channel: Union[TextChannel, int],
+			message: NewMessage):
+		channel: int = channel.id if isinstance(channel, TextChannel) else channel
+		endpoint = f"{self.base}/channels/{channel}/messages"
+		data = dumps(message._to_api())
+		headers = {
+			"content-type": "application/json",
+			"authorization": self._token
+		}
+
+		async with self.session.post(endpoint, data=data, headers=headers) as r:
+			print(await r.json())
+			print(r.status)
+
 # class WebSocketLike(Protocol):
 # 	async def send_str(self, data: str): ...
 # 	async def send_bytes(self, data: bytes): ...
@@ -53,11 +80,12 @@ class RESTClient:
 class GatewayClient:
 	token: str
 	manager: GatewayManager
-	dispatch: Callable[[Event], None]
+	dispatch: Callable[[Event], Awaitable]
 	cache: Optional[CacheManager]
 
 	def __init__(self, manager: GatewayManager, token: str,
-			dispatch: Callable[[Event], None], cache: Optional[CacheManager] = None):
+			dispatch: Callable[[Event], Awaitable],
+			cache: Optional[CacheManager] = None):
 		self.token = token
 		self.manager = manager
 		self.dispatch = dispatch
@@ -80,16 +108,20 @@ class GatewayClient:
 						self.cache.cache_guild(guild)
 					self.cache.cache_user()
 
-				self.dispatch(ReadyEvent(user, guilds))
+				await self.dispatch(ReadyEvent(user, guilds))
 			elif event == "GUILD_CREATE":
 				guild = AvailableGuild._from_api(self.cache, data)
 
 				if self.cache is not None:
 					self.cache.cache_guild(guild)
 
-				self.dispatch(GuildCreateEvent(guild))
-			else:
-				print(event, data)
+				await self.dispatch(GuildCreateEvent(guild))
+			elif event == "MESSAGE_CREATE":
+				message = Message._from_api(self.cache, data)
+
+				# TODO: CACHE
+
+				await self.dispatch(MessageCreateEvent(message))
 		elif op_code == 1:
 			await self.manager.heartbeat_now()
 		elif op_code == 10: # Hello!

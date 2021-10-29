@@ -12,3 +12,7 @@ class ReadyEvent(Event):
 @dataclass
 class GuildCreateEvent(Event):
 	guild: AvailableGuild
+
+@dataclass
+class MessageCreateEvent(Event):
+	message: Message
