@@ -1,3 +1,4 @@
+from __future__ import annotations
 from ..data import *
 from dataclasses import dataclass
 

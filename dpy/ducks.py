@@ -1,13 +1,20 @@
 from __future__ import annotations
+from . import gateway
 from .data import *
 from typing import Optional, Protocol
 
-class GatewayManager(Protocol):
+class AsyncGatewayManager(Protocol):
 	heartbeat_interval: Optional[int]
 
 	async def heartbeat_now(self): ...
 	async def send_str(self, data: str): ...
 	async def send_bytes(self, data: bytes): ...
+
+class RunnableAsyncGatewayManager(AsyncGatewayManager, Protocol):
+	@classmethod
+	async def connect(cls, base: str) -> RunnableAsyncGatewayManager: ...
+
+	async def run(self, client: gateway.GatewayClient): ...
 
 class CacheManager(Protocol):
 	async def cache_user(self, user): ...

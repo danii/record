@@ -1,4 +1,6 @@
-from . import GatewayClient
+from __future__ import annotations
+from ..gateway import GatewayClient
+from aiohttp import ClientSession
 from aiohttp.client_ws import ClientWebSocketResponse
 from asyncio.exceptions import TimeoutError
 from json import dumps, loads
@@ -7,14 +9,19 @@ from time import time_ns
 from typing import Optional
 
 class AIOHTTPGatewayManager:
-	client: GatewayClient
 	socket: ClientWebSocketResponse
+
 	heartbeat_interval: Optional[int]
 	waited: float
 
-	def __init__(self, socket: ClientWebSocketResponse, *arguments):
+	@classmethod
+	async def connect(cls, base: str) -> AIOHTTPGatewayManager:
+		socket = await ClientSession().ws_connect(f"wss://{base}?v=9&encoding=json")
+		return cls(socket)
+
+	def __init__(self, socket: ClientWebSocketResponse):
 		self.socket = socket
-		self.client = GatewayClient(self, *arguments)
+
 		self.heartbeat_interval = None
 		self.waited = 0
 
@@ -24,7 +31,7 @@ class AIOHTTPGatewayManager:
 	async def send_str(self, data: str):
 		await self.socket.send_str(data)
 
-	async def run(self):
+	async def run(self, client: GatewayClient):
 		default_timeout = 1000.0
 		sequence: Optional[int] = None
 
@@ -40,7 +47,7 @@ class AIOHTTPGatewayManager:
 				if message["s"] is not None:
 					sequence = message["s"]
 
-				await self.client.process_payload(message)
+				await client.process_payload(self, message)
 				self.waited = self.waited + ((time_ns() - start) / 1000000)
 				# We keep track of the time the processing took so we can keep track of
 				# how much time has passed since the last heartbeat (or initial

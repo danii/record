@@ -1,25 +1,24 @@
 from __future__ import annotations
+
 from .events import *
 from ..data import *
-from ..ducks import CacheManager, GatewayManager
+from ..ducks import AsyncGatewayManager
+from ..ducks import CacheManager
 from json import dumps
 from typing import Awaitable, Callable, Optional
 
 class GatewayClient:
 	token: str
-	manager: GatewayManager
 	dispatch: Callable[[Event], Awaitable]
 	cache: Optional[CacheManager]
 
-	def __init__(self, manager: GatewayManager, token: str,
-			dispatch: Callable[[Event], Awaitable],
-			cache: Optional[CacheManager] = None):
+	def __init__(self, dispatch: Callable[[Event], Awaitable],
+			cache: Optional[CacheManager] = None, token: str = None):
 		self.token = token
-		self.manager = manager
 		self.dispatch = dispatch
 		self.cache = cache
 
-	async def process_payload(self, payload):
+	async def process_payload(self, manager: AsyncGatewayManager, payload):
 		op_code: int = payload["op"]
 		data: Any = payload["d"]
 
@@ -33,15 +32,15 @@ class GatewayClient:
 
 				if self.cache is not None:
 					for guild in guilds:
-						self.cache.cache_guild(guild)
-					self.cache.cache_user()
+						await self.cache.cache_guild(guild)
+					await self.cache.cache_user(user)
 
 				await self.dispatch(ReadyEvent(user, guilds))
 			elif event == "GUILD_CREATE":
 				guild = AvailableGuild._from_api(self.cache, data)
 
 				if self.cache is not None:
-					self.cache.cache_guild(guild)
+					await self.cache.cache_guild(guild)
 
 				await self.dispatch(GuildCreateEvent(guild))
 			elif event == "MESSAGE_CREATE":
@@ -53,9 +52,9 @@ class GatewayClient:
 		elif op_code == 1:
 			await self.manager.heartbeat_now()
 		elif op_code == 10: # Hello!
-			self.manager.heartbeat_interval = data["heartbeat_interval"]
+			manager.heartbeat_interval = data["heartbeat_interval"]
 
-			await self.manager.send_str(dumps({
+			await manager.send_str(dumps({
 				"op": 2,
 				"d": {
 					"token": self.token,
