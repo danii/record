@@ -1,25 +1,21 @@
 from __future__ import annotations
-from ..gateway import GatewayClient
-from aiohttp import ClientSession
-from aiohttp.client_ws import ClientWebSocketResponse
-from asyncio.exceptions import TimeoutError
+from ..gateway import Event, process_payload
+from ..ducks import JSON, CacheManager, GatewayManager as GatewayProtocol, \
+	NetworkManagerWebsocket, type_check
 from json import dumps, loads
 from math import inf
 from time import time_ns
-from typing import Optional
+from typing import Awaitable, Callable, Generic, Optional, TypeVar
 
-class AIOHTTPGatewayManager:
-	socket: ClientWebSocketResponse
+_N = TypeVar("_N", bound=NetworkManagerWebsocket)
+
+class GatewayManager(Generic[_N]):
+	socket: _N
 
 	heartbeat_interval: Optional[int]
 	waited: float
 
-	@classmethod
-	async def connect(cls, base: str) -> AIOHTTPGatewayManager:
-		socket = await ClientSession().ws_connect(f"wss://{base}?v=9&encoding=json")
-		return cls(socket)
-
-	def __init__(self, socket: ClientWebSocketResponse):
+	def __init__(self, socket: _N):
 		self.socket = socket
 
 		self.heartbeat_interval = None
@@ -28,10 +24,15 @@ class AIOHTTPGatewayManager:
 	async def heartbeat_now(self):
 		self.waited = inf
 
-	async def send_str(self, data: str):
-		await self.socket.send_str(data)
+	async def heartbeat_set(self, interval: int):
+		self.heartbeat_interval = interval
 
-	async def run(self, client: GatewayClient):
+	async def send(self, data: JSON):
+		await self.socket.send(dumps(data))
+
+	async def run(self, token: str, *,
+			dispatch: Callable[[Event], Awaitable[None]],
+			cache: Optional[CacheManager] = None):
 		default_timeout = 1000.0
 		sequence: Optional[int] = None
 
@@ -43,11 +44,17 @@ class AIOHTTPGatewayManager:
 
 			try:
 				start = time_ns()
-				message = loads(await self.socket.receive_str(timeout=timeout))
+				raw: str = str(await self.socket.receive(timeout=timeout))
+				message = type_check(loads(raw), dict[str, JSON])
 				if message["s"] is not None:
-					sequence = message["s"]
+					if isinstance(message["s"], int) or isinstance(message["s"], float):
+						sequence = type_check(message["s"], int)
+					else:
+						raise TypeError(f"expected type float or int, found type \
+{type(message['s'])}")
 
-				await client.process_payload(self, message)
+				await process_payload(message, token,
+					dispatch=dispatch, cache=cache, manager=self)
 				self.waited = self.waited + ((time_ns() - start) / 1000000)
 				# We keep track of the time the processing took so we can keep track of
 				# how much time has passed since the last heartbeat (or initial
@@ -62,5 +69,7 @@ class AIOHTTPGatewayManager:
 				else:
 					# If we timed out for any other reason then it must be because we hit
 					# the heartbeat timeout, so time to pulse blood through our veins!
-					await self.send_str(dumps({"op": 1, "d": sequence}))
+					await self.send({"op": 1, "d": sequence})
 					self.waited = 0
+
+_: type[GatewayProtocol] = GatewayManager

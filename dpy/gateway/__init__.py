@@ -2,73 +2,64 @@ from __future__ import annotations
 
 from .events import *
 from ..data import *
-from ..ducks import AsyncGatewayManager
-from ..ducks import CacheManager
-from json import dumps
+from ..ducks import JSON, CacheManager, GatewayManager, type_check
 from typing import Awaitable, Callable, Optional
 
-class GatewayClient:
-	"""A client responsible for parsing and creating events from a gateway
-	connection.
+async def process_payload(payload: JSON, token: str, *,
+		dispatch: Callable[[Event], Awaitable[None]], manager: GatewayManager,
+		cache: Optional[CacheManager] = None):
+	if not isinstance(payload, dict):
+		raise TypeError(f"expected type dict, found type {type(payload)}")
 
-	
-	"""
-	token: str
-	dispatch: Callable[[Event], Awaitable[None]]
-	cache: Optional[CacheManager]
+	op_code = type_check(payload["op"], int)
+	data = payload["d"]
 
-	def __init__(self, dispatch: Callable[[Event], Awaitable[None]],
-			cache: Optional[CacheManager] = None, token: Optional[str] = None):
-		self.token = token
-		self.dispatch = dispatch
-		self.cache = cache
+	if op_code == 0: # Dispatch
+		data = type_check(data, dict[str, JSON])
+		event = type_check(payload["t"], str)
 
-	async def process_payload(self, manager: AsyncGatewayManager, payload: dict[str, Any]):
-		op_code: int = payload["op"]
-		data: Any = payload["d"]
+		if event == "READY":
+			user = SelfUser(type_check(data["user"], dict[str, JSON]), cache)
+			guilds = [
+				Guild(type_check(guild, dict[str, JSON]), cache) \
+					for guild in type_check(data["guilds"], list[JSON])
+			]
 
-		if op_code == 0: # Dispatch
-			event: str = payload["t"]
+			if cache is not None:
+				for guild in guilds:
+					await cache.cache_guild(guild)
+				await cache.cache_user(user)
 
-			if event == "READY":
-				print(data)
-				user = SelfUser(data["user"], self.cache)
-				guilds = [Guild(guild, self.cache) for guild in data["guilds"]]
+			await dispatch(ReadyEvent(user, guilds))
+		elif event == "GUILD_CREATE":
+			guild = AvailableGuild(data, cache)
 
-				if self.cache is not None:
-					for guild in guilds:
-						await self.cache.cache_guild(guild)
-					await self.cache.cache_user(user)
+			if cache is not None:
+				await cache.cache_guild(guild)
 
-				await self.dispatch(ReadyEvent(user, guilds))
-			elif event == "GUILD_CREATE":
-				guild = AvailableGuild(data, self.cache)
+			await dispatch(GuildCreateEvent(guild))
+		elif event == "MESSAGE_CREATE":
+			message = Message(data, cache)
 
-				if self.cache is not None:
-					await self.cache.cache_guild(guild)
+			# TODO: CACHE
 
-				await self.dispatch(GuildCreateEvent(guild))
-			elif event == "MESSAGE_CREATE":
-				message = Message(data, self.cache)
+			await dispatch(MessageCreateEvent(message))
+	elif op_code == 1:
+		await manager.heartbeat_now()
+	elif op_code == 10: # Hello
+		data = type_check(data, dict[str, JSON])
+		await manager.heartbeat_set(type_check(data["heartbeat_interval"], int))
 
-				# TODO: CACHE
-
-				await self.dispatch(MessageCreateEvent(message))
-		elif op_code == 1:
-			await manager.heartbeat_now()
-		elif op_code == 10: # Hello!
-			manager.heartbeat_interval = data["heartbeat_interval"]
-
-			await manager.send_str(dumps({
-				"op": 2,
-				"d": {
-					"token": self.token,
-					"properties": {
-						"$os": "linux",
-						"$browser": "an unnamed in-dev Discord library",
-						"$device": "an unnamed in-dev Discord library"
-					},
-					"compress": False,
-					"intents": 0b111111111111111
-				}
-			}))
+		await manager.send({
+			"op": 2,
+			"d": {
+				"token": token,
+				"properties": {
+					"$os": "linux",
+					"$browser": "an unnamed in-dev Discord library",
+					"$device": "an unnamed in-dev Discord library"
+				},
+				"compress": False,
+				"intents": 0b111111111111111
+			}
+		})

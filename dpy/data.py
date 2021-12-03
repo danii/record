@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing_extensions import TypeAlias
-from .ducks import CacheManager
+from .ducks import JSON as _JSON, CacheManager
 from abc import ABC, abstractmethod
 from itertools import tee
 from typing import Any, Callable, Generator, Generic, Literal, Optional, \
@@ -24,7 +24,7 @@ class _constructor(ABC, Generic[_T]):
 	"""
 
 	@abstractmethod
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> _T:
 		"""Constructs the referenced data."""
 
@@ -58,7 +58,7 @@ class _auto(_constructor[_T]):
 		self._Type = Type
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> Optional[_T]:
 		# If the specified type is a decendant of Entity...
 		if Entity in self._Type.mro():
@@ -80,12 +80,12 @@ class _list_constructor(_constructor[list[_T]]):
 		self._constructor_ = constructor
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> list[_T]:
 		# Type checking...
 		list_value: Union[list[Any], Any] = data[property]
 		if not isinstance(list_value, list):
-			raise TypeError()
+			raise TypeError(f"expected type list, found type {type(list_value)}")
 
 		list_return: list[_T] = []
 		# For each item in the list...
@@ -104,7 +104,7 @@ class _optional_constructor(_constructor[Optional[_T]]):
 		self._constructor_ = constructor
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> Optional[_T]:
 		# If data exists...
 		if property in data:
@@ -127,7 +127,7 @@ class _convert_constructor(_constructor[_T], Generic[_U, _T]):
 		self._convert = convert
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> _T:
 		# Convert the data with _convert.
 		construct = cast(_constructor[_T], self._constructor_).construct
@@ -148,7 +148,7 @@ class _entity_reference(_constructor[Union[_T, _U]], Generic[_T, _U]):
 		self._fetch = fetch
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> Union[_T, _U]:
 		# Get the identifier.
 		construct = cast(_constructor[_U], self._id_constructor).construct
@@ -181,7 +181,7 @@ class _as(_constructor[_T]):
 		self._as = as_
 		super().__init__()
 
-	def construct(self, property: str, data: dict[str, Any],
+	def construct(self, property: str, data: dict[str, _JSON],
 			cache: Optional[CacheManager] = None) -> _T:
 		# Delegate using the desired name.
 		construct = cast(_constructor[_T], self._constructor_).construct
@@ -199,7 +199,7 @@ class Entity:
 	__property_map__: dict[_constructor[Any], Callable[[], Any]]
 	_tuple: tuple[Any, ...]
 
-	def __init__(self, data: dict[str, Any], cache: Optional[CacheManager]=None):
+	def __init__(self, data: dict[str, _JSON], cache: Optional[CacheManager]=None):
 		def generate():
 			cls = type(self)
 			constructors = cast( # Python type checkers are dumb as ****.
@@ -273,6 +273,9 @@ class GuildTextChannel(GuildChildChannel, TextChannel):
 class Message(Entity):
 	id = _id_constructor
 	content = _auto(str)
+
+	def __str__(self) -> str:
+		return self.content
 
 class Guild(Entity):
 	id = _id_constructor
