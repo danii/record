@@ -7,11 +7,11 @@ from typing import Any, Callable, Generator, Generic, Literal, Optional, \
 	TypeVar, Union, cast, overload
 
 _T = TypeVar("_T")
-_I = TypeVar("_I")
+_U = TypeVar("_U")
 _constructorSelf = TypeVar("_constructorSelf", bound="_constructor[Any]")
 
 CacheFetchFetcher: TypeAlias = \
-	Callable[[CacheManager], Callable[[_I], Optional[_T]]]
+	Callable[[CacheManager], Callable[[_U], Optional[_T]]]
 
 class _constructor(ABC, Generic[_T]):
 	"""The abstract base class for defining self constructing properties.
@@ -71,7 +71,9 @@ class _auto(_constructor[_T]):
 				raise TypeError(f"expected type {self._Type}, found type {type(value)}")
 			return value
 
-class _list_constructor(_constructor[_T]):
+class _list_constructor(_constructor[list[_T]]):
+	"""Super constructor for lists."""
+
 	_constructor_: _constructor[_T]
 
 	def __init__(self, constructor: _constructor[_T]):
@@ -80,17 +82,22 @@ class _list_constructor(_constructor[_T]):
 
 	def construct(self, property: str, data: dict[str, Any],
 			cache: Optional[CacheManager] = None) -> list[_T]:
+		# Type checking...
 		list_value: Union[list[Any], Any] = data[property]
 		if not isinstance(list_value, list):
 			raise TypeError()
 
 		list_return: list[_T] = []
+		# For each item in the list...
 		for value in list_value:
+			# ...run the constructor.
 			construct = cast(_constructor[_T], self._constructor_).construct
 			list_return.append(construct(property, {property: value}))
 		return list_return
 
 class _optional_constructor(_constructor[Optional[_T]]):
+	"""Super constructor for optional data."""
+
 	_constructor_: _constructor[_T]
 
 	def __init__(self, constructor: _constructor[_T]):
@@ -99,49 +106,76 @@ class _optional_constructor(_constructor[Optional[_T]]):
 
 	def construct(self, property: str, data: dict[str, Any],
 			cache: Optional[CacheManager] = None) -> Optional[_T]:
+		# If data exists...
 		if property in data:
+			# ...then run the constructor.
 			construct = cast(_constructor[_T], self._constructor_).construct
 			return construct(property, data, cache)
 		else:
+			# Otherwise return None.
 			return None
 
-class _convert_constructor(_constructor[_T], Generic[_I, _T]):
-	_constructor_: _constructor[_I]
-	_convert: Callable[[_I], _T]
+class _convert_constructor(_constructor[_T], Generic[_U, _T]):
+	"""Super constructor for converting data before storing."""
 
-	def __init__(self, constructor: _constructor[_I],
-			convert: Callable[[_I], _T]):
+	_constructor_: _constructor[_U]
+	_convert: Callable[[_U], _T]
+
+	def __init__(self, constructor: _constructor[_U],
+			convert: Callable[[_U], _T]):
 		self._constructor_ = constructor
 		self._convert = convert
 		super().__init__()
 
 	def construct(self, property: str, data: dict[str, Any],
 			cache: Optional[CacheManager] = None) -> _T:
+		# Convert the data with _convert.
 		construct = cast(_constructor[_T], self._constructor_).construct
 		return self._convert(construct(property, data, cache))
 
-class _entity_reference(_constructor[Union[_T, _I]], Generic[_T, _I]):
+class _entity_reference(_constructor[Union[_T, _U]], Generic[_T, _U]):
+	"""Super constructor for references of things in cache."""
+
+	_id_constructor: _constructor[_U]
+	_entity: type[_T]
+	_fetch: Union[str, CacheFetchFetcher[_U, _T]]
+
 	def __init__(self, reference_to: type[_T],
-			fetch: Union[str, CacheFetchFetcher[_I, _T]], *,
-			id: _constructor[_I] = _convert_constructor(_auto(str), int)):
+			fetch: Union[str, CacheFetchFetcher[_U, _T]], *,
+			id: _constructor[_U] = _convert_constructor(_auto(str), int)):
+		self._id_constructor = id
 		self._entity = reference_to
 		self._fetch = fetch
 		super().__init__()
 
 	def construct(self, property: str, data: dict[str, Any],
-			cache: Optional[CacheManager] = None) -> _T:
+			cache: Optional[CacheManager] = None) -> Union[_T, _U]:
+		# Get the identifier.
+		construct = cast(_constructor[_U], self._id_constructor).construct
+		identifier = construct(property, data, cache)
+
+		# If cache is none...
 		if cache is None:
-			return data[property]
+			# ...just return the identifier.
+			return identifier
 		else:
+			# Otherwise use the cache with the identifier to get the desired data.
 			fetcher = getattr(cache, self._fetch) if isinstance(self._fetch, str) \
 				else self._fetch(cache)
-			result = fetcher(data[property])
+			value = fetcher(data[property])
 
-			if result is not None and not isinstance(result, self._entity):
-				raise TypeError("expected entity")
-			return data[property] if result is None else result
+			# Type check.
+			if value is not None and not isinstance(value, self._entity):
+				raise TypeError(f"expected type {self._entity}, \
+found type {type(value)}")
+			return identifier if value is None else value
 
 class _as(_constructor[_T]):
+	"""Super constructor for fetching data under a different property name."""
+
+	_constructor_: _constructor[_T]
+	_as: str
+
 	def __init__(self, constructor: _constructor[_T], as_: str):
 		self._constructor_ = constructor
 		self._as = as_
@@ -149,6 +183,7 @@ class _as(_constructor[_T]):
 
 	def construct(self, property: str, data: dict[str, Any],
 			cache: Optional[CacheManager] = None) -> _T:
+		# Delegate using the desired name.
 		construct = cast(_constructor[_T], self._constructor_).construct
 		return construct(self._as, data, cache)
 
@@ -236,7 +271,7 @@ class GuildTextChannel(GuildChildChannel, TextChannel):
 		return f"<@#{self.id}>"
 
 class Message(Entity):
-	id = _auto(int)
+	id = _id_constructor
 	content = _auto(str)
 
 class Guild(Entity):
